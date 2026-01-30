@@ -7,24 +7,14 @@ from datetime import date
 
 st.set_page_config(page_title="Org Requests Dashboard", layout="wide")
 
-# ----------------------------
-# Secrets (with env fallback)
-# ----------------------------
-# Expected in .streamlit/secrets.toml:
-#   APP_PASSWORD = "..."
-#   SUPABASE_URL = "..."
-#   SUPABASE_KEY = "..."
 APP_PASSWORD = (st.secrets.get("APP_PASSWORD", "") if hasattr(st, "secrets") else "")
 SUPABASE_URL = (st.secrets.get("SUPABASE_URL", "") if hasattr(st, "secrets") else "")
 SUPABASE_KEY = (st.secrets.get("SUPABASE_KEY", "") if hasattr(st, "secrets") else "")
 
 PAGE_SIZE = 5
 
-# ----------------------------
-# SIMPLE PASSWORD GATE (no localStorage)
-# ----------------------------
 def _auth_ui():
-    st.markdown("# 🔒 Sign in")
+    st.markdown("# Sign in")
     st.caption("Enter the shared password to access this dashboard.")
 
     pw = st.text_input("Password", type="password", key="pw_input")
@@ -41,7 +31,6 @@ def _auth_ui():
         else:
             st.error("Wrong password.")
 
-# Enforce auth if password is set
 if APP_PASSWORD:
     if "authed" not in st.session_state:
         st.session_state["authed"] = False
@@ -49,15 +38,6 @@ if APP_PASSWORD:
     if not st.session_state["authed"]:
         _auth_ui()
         st.stop()
-
-    with st.sidebar:
-        if st.button("Logout"):
-            st.session_state["authed"] = False
-            st.rerun()
-
-# ----------------------------
-# END AUTH BLOCK
-# ----------------------------
 
 @st.cache_resource
 def sb() -> Client:
@@ -70,9 +50,7 @@ client = sb()
 
 st.title("Org Requests Dashboard")
 
-# ----------------------------
 # Helpers
-# ----------------------------
 def is_int(s: str) -> bool:
     try:
         int(s)
@@ -131,7 +109,7 @@ def get_requests_for_org(org_id: int):
             "organization_id, organization_year_id, team_name, date_requested, tag_level, event_name, "
             "start_date_calendar_year, start_date, event_schedule_group_id, event_id, "
             "accountingregionid, accountinggroupid, orgcontactname, orgcontactemail, "
-            "orgcontactphone, registration_status, orgname_key, updated_at"
+            "orgcontactphone, registration_status, updated_at"
         )
         .eq("organization_id", org_id)
         .order("start_date", desc=False)
@@ -151,9 +129,7 @@ def apply_dropdown_filters(d: pd.DataFrame, status_choice: str, event_choice: st
         out = out[out["event_name"] == event_choice]
     return out
 
-# ----------------------------
-# Rep View helpers
-# ----------------------------
+
 @st.cache_data(ttl=60)
 def fetch_reps():
     res = client.table("reps").select("rep_id, rep_name").order("rep_name").execute()
@@ -189,7 +165,6 @@ def fetch_org_details(org_ids):
 
 @st.cache_data(ttl=60)
 def fetch_requests_for_org_ids(org_ids):
-    """Minimal pull for rep-level metrics; chunked to avoid URL limits."""
     if not org_ids:
         return pd.DataFrame()
 
@@ -227,7 +202,6 @@ def render_org_insights(selected_org, org_id: int):
     st.markdown("### Contact")
 
     contact_row = df[df["orgcontactname"].notna()].head(1)
-
     if contact_row.empty:
         st.caption("No contact info found for this org.")
     else:
@@ -272,7 +246,6 @@ def render_org_insights(selected_org, org_id: int):
         a, b = st.columns(2)
         a.metric("2025 Requests", count_2025)
         b.metric(f"2025 YTD (thru {cutoff_2025.strftime('%b %d')})", len(df_2025_ytd), delta=ytd_delta)
-
     s3.metric("2026 Requests (YoY)", count_2026, delta=yoy_delta)
 
     tab25, tab26, taball = st.tabs(["2025 Requests", "2026 Requests", "All (Filtered)"])
@@ -295,14 +268,17 @@ def render_org_insights(selected_org, org_id: int):
 
     with tab25:
         st.dataframe(df_2025[cols_show], use_container_width=True)
-
     with tab26:
         st.dataframe(df_2026[cols_show], use_container_width=True)
-
     with taball:
         st.dataframe(df[cols_show], use_container_width=True)
 
-mode = st.radio("Mode", ["Search Org", "Rep View"], horizontal=True)
+# ----------------------------
+# Mode Toggle (SIDEBAR)
+# ----------------------------
+with st.sidebar:
+    mode = st.radio("Mode", ["Search Org", "Orgs by Person"], index=0)
+
 
 if mode == "Search Org":
     if "org_results" not in st.session_state:
@@ -372,8 +348,9 @@ if mode == "Search Org":
 
     render_org_insights(selected_org, org_id)
 
+
 else:
-    st.markdown("### Rep View")
+    st.markdown("### Orgs by Person")
 
     reps = fetch_reps()
     if not reps:
