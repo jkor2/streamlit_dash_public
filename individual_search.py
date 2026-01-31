@@ -60,8 +60,8 @@ client = sb()
 st.title("Org Requests Dashboard")
 
 st.markdown(
-    "➡️ **Looking for orgs by rep?** "
-    "[Go to Rep Org Dashboard](https://orgdashboard.streamlit.app/)",
+    "**Looking for orgs by person?** "
+    "[Go to Assigned Org Dashboard](https://orgdashboard.streamlit.app/)",
     unsafe_allow_html=True,
 )
 

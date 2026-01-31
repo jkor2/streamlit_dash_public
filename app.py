@@ -222,12 +222,12 @@ st.markdown("### Orgs by Person")
 
 reps = fetch_reps()
 if not reps:
-    st.warning("No reps found. (Create reps + assignments tables + import sheet first.)")
+    st.warning("No people found. (Create reps + assignments tables + import sheet first.)")
     st.stop()
 
 rep_labels = [f'{r["rep_name"]} (ID {r["rep_id"]})' for r in reps]
 
-rep_choice = st.selectbox("Select Rep", ["-- Select --"] + rep_labels, index=0)
+rep_choice = st.selectbox("Select Person", ["-- Select --"] + rep_labels, index=0)
 
 if rep_choice == "-- Select --":
     st.stop()
@@ -237,7 +237,7 @@ rep_id = int(rep["rep_id"])
 
 org_ids = fetch_org_ids_for_rep(rep_id)
 if not org_ids:
-    st.info("No assigned orgs for this rep.")
+    st.info("No assigned orgs for this person.")
     st.stop()
 
 org_details = fetch_org_details(org_ids)
