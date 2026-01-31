@@ -50,6 +50,12 @@ client = sb()
 
 st.title("Org Requests Dashboard")
 
+st.markdown(
+    "➡️ **Looking for individual org search?** "
+    "[Go to Org Search Dashboard](https://orgsearch.streamlit.app/)",
+    unsafe_allow_html=True,
+)
+
 # Helpers
 def is_int(s: str) -> bool:
     try:
