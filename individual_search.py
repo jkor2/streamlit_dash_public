@@ -11,7 +11,7 @@ APP_PASSWORD = (st.secrets.get("APP_PASSWORD", "") if hasattr(st, "secrets") els
 SUPABASE_URL = (st.secrets.get("SUPABASE_URL", "") if hasattr(st, "secrets") else "")
 SUPABASE_KEY = (st.secrets.get("SUPABASE_KEY", "") if hasattr(st, "secrets") else "")
 
-PAGE_SIZE = 10  # ✅ 10 orgs per page
+PAGE_SIZE = 10  # ✅ limit to 10 orgs per search page
 
 # ----------------------------
 # Password Gate
@@ -77,6 +77,10 @@ def is_int(s: str) -> bool:
 
 def similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
+
+def chunked(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
 
 def pg_org_link(org_id: int) -> str:
     url = f"https://www.perfectgame.org/PGBA/Team/default.aspx?orgid={org_id}"
@@ -196,7 +200,7 @@ def render_org_insights(selected_org, org_id: int):
     st.dataframe(df, use_container_width=True)
 
 # ----------------------------
-# Search UI (paginated 10)
+# Search UI
 # ----------------------------
 if "org_results" not in st.session_state:
     st.session_state.org_results = []
@@ -216,9 +220,11 @@ q = st.text_input(
 do_search = st.button("Search", use_container_width=True)
 
 if do_search:
-    st.session_state.searched_query = (q or "").strip()
+    st.session_state.searched_query = q.strip()
     st.session_state.org_results = fetch_org_candidates(st.session_state.searched_query)
     st.session_state.org_page = 0
+    if "org_pick" in st.session_state:
+        st.session_state["org_pick"] = "-- Select an organization --"
 
 results = st.session_state.org_results
 page = st.session_state.org_page
@@ -244,21 +250,30 @@ p1, p2, p3 = st.columns([1, 1, 6])
 with p1:
     if st.button("⬅ Prev", disabled=(page == 0)):
         st.session_state.org_page = max(0, page - 1)
+        st.session_state["org_pick"] = "-- Select an organization --"
         st.rerun()
 with p2:
     if st.button("Next ➡", disabled=(page >= total_pages - 1)):
         st.session_state.org_page = min(total_pages - 1, page + 1)
+        st.session_state["org_pick"] = "-- Select an organization --"
         st.rerun()
 with p3:
     st.caption(f"Showing {start+1}-{end} of {total} (Page {page+1} / {total_pages})")
 
 options = [
-    f'{o["organization_id"]} — {o.get("organization_name","(no name)")} '
-    f'({o.get("org_city","")}, {o.get("org_state","")})'
+    f'{o["organization_id"]} — {o.get("organization_name","(no name)")} ({o.get("org_city","")}, {o.get("org_state","")})'
     for o in page_rows
 ]
 
-choice = st.radio("Select the correct organization", options, index=0, key="org_pick")
+choice = st.radio(
+    "Select the correct organization",
+    ["-- Select an organization --"] + options,
+    index=0,
+    key="org_pick",
+)
+
+if choice == "-- Select an organization --":
+    st.stop()
 
 selected_org = page_rows[options.index(choice)]
 org_id = int(selected_org["organization_id"])
