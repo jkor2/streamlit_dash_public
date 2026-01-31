@@ -70,38 +70,6 @@ def pg_org_link(org_id: int) -> str:
     return f'<a href="{url}" target="_blank">{org_id}</a>'
 
 @st.cache_data(ttl=60)
-def fetch_org_candidates(query: str):
-    query = (query or "").strip()
-    if not query:
-        return []
-
-    if is_int(query):
-        res = (
-            client.table("orgs")
-            .select("organization_id, organization_name, org_city, org_state")
-            .eq("organization_id", int(query))
-            .execute()
-        )
-        return res.data or []
-
-    res = (
-        client.table("orgs")
-        .select("organization_id, organization_name, org_city, org_state")
-        .ilike("organization_name", f"%{query}%")
-        .limit(200)
-        .execute()
-    )
-
-    rows = res.data or []
-    rows.sort(
-        key=lambda o: (
-            -similarity(query, o.get("organization_name") or ""),
-            len(o.get("organization_name") or ""),
-        )
-    )
-    return rows
-
-@st.cache_data(ttl=60)
 def get_requests_for_org(org_id: int):
     res = (
         client.table("requests")
@@ -128,7 +96,6 @@ def apply_dropdown_filters(d: pd.DataFrame, status_choice: str, event_choice: st
     if event_choice != "All":
         out = out[out["event_name"] == event_choice]
     return out
-
 
 @st.cache_data(ttl=60)
 def fetch_reps():
@@ -162,31 +129,6 @@ def fetch_org_details(org_ids):
         out.extend(res.data or [])
     out.sort(key=lambda r: (r.get("organization_name") or "", r.get("organization_id") or 0))
     return out
-
-@st.cache_data(ttl=60)
-def fetch_requests_for_org_ids(org_ids):
-    if not org_ids:
-        return pd.DataFrame()
-
-    frames = []
-    cols = "organization_id,start_date_calendar_year,date_requested"
-    for batch in chunked(org_ids, 200):
-        res = (
-            client.table("requests")
-            .select(cols)
-            .in_("organization_id", batch)
-            .execute()
-        )
-        data = res.data or []
-        if data:
-            frames.append(pd.DataFrame(data))
-
-    if not frames:
-        return pd.DataFrame()
-    dfm = pd.concat(frames, ignore_index=True)
-    dfm["start_date_calendar_year"] = pd.to_numeric(dfm.get("start_date_calendar_year"), errors="coerce")
-    dfm["date_requested"] = pd.to_datetime(dfm.get("date_requested"), errors="coerce").dt.date
-    return dfm
 
 def render_org_insights(selected_org, org_id: int):
     org_name = selected_org.get("organization_name", "(no name)")
@@ -274,112 +216,45 @@ def render_org_insights(selected_org, org_id: int):
         st.dataframe(df[cols_show], use_container_width=True)
 
 # ----------------------------
-# Mode Toggle (SIDEBAR)
+# Orgs by Person
 # ----------------------------
-with st.sidebar:
-    mode = st.radio("Mode", ["Search Org", "Orgs by Person"], index=0)
+st.markdown("### Orgs by Person")
 
+reps = fetch_reps()
+if not reps:
+    st.warning("No reps found. (Create reps + assignments tables + import sheet first.)")
+    st.stop()
 
-if mode == "Search Org":
-    if "org_results" not in st.session_state:
-        st.session_state.org_results = []
-    if "org_page" not in st.session_state:
-        st.session_state.org_page = 0
-    if "searched_query" not in st.session_state:
-        st.session_state.searched_query = ""
+rep_labels = [f'{r["rep_name"]} (ID {r["rep_id"]})' for r in reps]
 
-    st.markdown("### Find an Organization")
+rep_choice = st.selectbox("Select Rep", ["-- Select --"] + rep_labels, index=0)
 
-    q = st.text_input(
-        "Search by Organization Name or Organization ID",
-        placeholder="e.g. 78598 or Canes Baseball",
-        key="org_query",
-    )
+if rep_choice == "-- Select --":
+    st.stop()
 
-    c1, c2 = st.columns([1, 6])
-    with c1:
-        do_search = st.button("Search", use_container_width=True)
+rep = reps[rep_labels.index(rep_choice)]
+rep_id = int(rep["rep_id"])
 
-    if do_search:
-        st.session_state.searched_query = q.strip()
-        st.session_state.org_results = fetch_org_candidates(st.session_state.searched_query)
-        st.session_state.org_page = 0
+org_ids = fetch_org_ids_for_rep(rep_id)
+if not org_ids:
+    st.info("No assigned orgs for this rep.")
+    st.stop()
 
-    results = st.session_state.org_results
-    page = st.session_state.org_page
+org_details = fetch_org_details(org_ids)
 
-    if st.session_state.searched_query and not results:
-        st.warning("No orgs found.")
-        st.stop()
+st.markdown("### Assigned Orgs")
 
-    if not results:
-        st.info("Type a org name or id and click Search.")
-        st.stop()
+org_options = [
+    f'{o["organization_id"]} — {o.get("organization_name","(no name)")} ({o.get("org_city","")}, {o.get("org_state","")})'
+    for o in org_details
+]
 
-    total = len(results)
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = max(0, min(page, total_pages - 1))
-    st.session_state.org_page = page
+choice = st.selectbox("Select an org to view insights", ["-- Select --"] + org_options, index=0, key="rep_org_pick")
 
-    start = page * PAGE_SIZE
-    end = min(start + PAGE_SIZE, total)
-    page_rows = results[start:end]
+if choice == "-- Select --":
+    st.stop()
 
-    p1, p2, p3 = st.columns([1, 1, 6])
-    with p1:
-        if st.button("⬅ Prev", disabled=(page == 0)):
-            st.session_state.org_page = max(0, page - 1)
-            st.rerun()
-    with p2:
-        if st.button("Next ➡", disabled=(page >= total_pages - 1)):
-            st.session_state.org_page = min(total_pages - 1, page + 1)
-            st.rerun()
-    with p3:
-        st.caption(f"Showing {start+1}-{end} of {total} (Page {page+1} / {total_pages})")
+selected_org = org_details[org_options.index(choice)]
+org_id = int(selected_org["organization_id"])
 
-    options = [
-        f'{o["organization_id"]} — {o.get("organization_name","(no name)")} ({o.get("org_city","")}, {o.get("org_state","")})'
-        for o in page_rows
-    ]
-    choice = st.radio("Select the correct organization", options, index=0)
-
-    selected_org = page_rows[options.index(choice)]
-    org_id = int(selected_org["organization_id"])
-
-    render_org_insights(selected_org, org_id)
-
-
-else:
-    st.markdown("### Orgs by Person")
-
-    reps = fetch_reps()
-    if not reps:
-        st.warning("No reps found. (Create reps + assignments tables + import sheet first.)")
-        st.stop()
-
-    rep_labels = [f'{r["rep_name"]} (ID {r["rep_id"]})' for r in reps]
-    rep_choice = st.selectbox("Select Rep", rep_labels, index=0)
-
-    rep = reps[rep_labels.index(rep_choice)]
-    rep_id = int(rep["rep_id"])
-
-    org_ids = fetch_org_ids_for_rep(rep_id)
-    if not org_ids:
-        st.info("No assigned orgs for this rep.")
-        st.stop()
-
-    org_details = fetch_org_details(org_ids)
-
-    st.markdown("### Assigned Orgs")
-
-    org_options = [
-        f'{o["organization_id"]} — {o.get("organization_name","(no name)")} ({o.get("org_city","")}, {o.get("org_state","")})'
-        for o in org_details
-    ]
-
-    choice = st.selectbox("Select an org to view insights", org_options, index=0, key="rep_org_pick")
-
-    selected_org = org_details[org_options.index(choice)]
-    org_id = int(selected_org["organization_id"])
-
-    render_org_insights(selected_org, org_id)
+render_org_insights(selected_org, org_id)
