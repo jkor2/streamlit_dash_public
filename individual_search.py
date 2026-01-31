@@ -11,7 +11,7 @@ APP_PASSWORD = (st.secrets.get("APP_PASSWORD", "") if hasattr(st, "secrets") els
 SUPABASE_URL = (st.secrets.get("SUPABASE_URL", "") if hasattr(st, "secrets") else "")
 SUPABASE_KEY = (st.secrets.get("SUPABASE_KEY", "") if hasattr(st, "secrets") else "")
 
-PAGE_SIZE = 5
+PAGE_SIZE = 10  # ✅ 10 orgs per page
 
 # ----------------------------
 # Password Gate
@@ -77,10 +77,6 @@ def is_int(s: str) -> bool:
 
 def similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
-
-def chunked(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
 
 def pg_org_link(org_id: int) -> str:
     url = f"https://www.perfectgame.org/PGBA/Team/default.aspx?orgid={org_id}"
@@ -182,9 +178,9 @@ def render_org_insights(selected_org, org_id: int):
 
     col1, col2 = st.columns(2)
     with col1:
-        status_choice = st.selectbox("Registration Status", status_options, index=0)
+        status_choice = st.selectbox("Registration Status", status_options, index=0, key=f"status_{org_id}")
     with col2:
-        event_choice = st.selectbox("Event Name", event_options, index=0)
+        event_choice = st.selectbox("Event Name", event_options, index=0, key=f"event_{org_id}")
 
     df = apply_dropdown_filters(df, status_choice, event_choice)
 
@@ -200,34 +196,71 @@ def render_org_insights(selected_org, org_id: int):
     st.dataframe(df, use_container_width=True)
 
 # ----------------------------
-# Search UI
+# Search UI (paginated 10)
 # ----------------------------
+if "org_results" not in st.session_state:
+    st.session_state.org_results = []
+if "org_page" not in st.session_state:
+    st.session_state.org_page = 0
+if "searched_query" not in st.session_state:
+    st.session_state.searched_query = ""
+
 st.markdown("### Find an Organization")
 
 q = st.text_input(
     "Search by Organization Name or Organization ID",
     placeholder="e.g. 78598 or Canes Baseball",
+    key="org_query",
 )
 
 do_search = st.button("Search", use_container_width=True)
 
-if not do_search:
-    st.stop()
+if do_search:
+    st.session_state.searched_query = (q or "").strip()
+    st.session_state.org_results = fetch_org_candidates(st.session_state.searched_query)
+    st.session_state.org_page = 0
 
-results = fetch_org_candidates(q)
-if not results:
+results = st.session_state.org_results
+page = st.session_state.org_page
+
+if st.session_state.searched_query and not results:
     st.warning("No orgs found.")
     st.stop()
+
+if not results:
+    st.info("Type a org name or id and click Search.")
+    st.stop()
+
+total = len(results)
+total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+page = max(0, min(page, total_pages - 1))
+st.session_state.org_page = page
+
+start = page * PAGE_SIZE
+end = min(start + PAGE_SIZE, total)
+page_rows = results[start:end]
+
+p1, p2, p3 = st.columns([1, 1, 6])
+with p1:
+    if st.button("⬅ Prev", disabled=(page == 0)):
+        st.session_state.org_page = max(0, page - 1)
+        st.rerun()
+with p2:
+    if st.button("Next ➡", disabled=(page >= total_pages - 1)):
+        st.session_state.org_page = min(total_pages - 1, page + 1)
+        st.rerun()
+with p3:
+    st.caption(f"Showing {start+1}-{end} of {total} (Page {page+1} / {total_pages})")
 
 options = [
     f'{o["organization_id"]} — {o.get("organization_name","(no name)")} '
     f'({o.get("org_city","")}, {o.get("org_state","")})'
-    for o in results
+    for o in page_rows
 ]
 
-choice = st.radio("Select the correct organization", options, index=0)
+choice = st.radio("Select the correct organization", options, index=0, key="org_pick")
 
-selected_org = results[options.index(choice)]
+selected_org = page_rows[options.index(choice)]
 org_id = int(selected_org["organization_id"])
 
 render_org_insights(selected_org, org_id)
